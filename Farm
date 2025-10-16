@@ -1,10 +1,11 @@
 -- ===================================================================
--- SCRIPT FINAL V14 (COMPLETO)
+-- SCRIPT FINAL V15 (COMPLETO)
 -- ===================================================================
 
 -- =================== CONFIGURAÇÕES ===================
 local ALCANCE_COLETA_PASSIVA = 20
 local NOME_DO_NPC_VENDEDOR = "Merchant"
+local TELEPORT_DIST_THRESHOLD = 5 -- só teleporta se estiver a mais de 5 studs do item
 
 local priority = {
     ["Perfect Crystal"] = 6000, ["Green Jewel"] = 3100, ["Red Jewel"] = 400,
@@ -27,6 +28,7 @@ local isTeleporting = false
 local isCollecting = false
 
 local camera = workspace.CurrentCamera
+local cameraWasCustom = camera.CameraType
 
 -- =================== CRIAÇÃO DA UI ===================
 local playerGui = player:WaitForChild("PlayerGui")
@@ -67,6 +69,10 @@ teleportToggle.InputBegan:Connect(function(input)
         local goal = isTeleporting and {Position = UDim2.new(0,80,0,0), BackgroundColor3 = Color3.fromRGB(50,200,50)}
         or {Position = UDim2.new(0,0,0,0), BackgroundColor3 = Color3.fromRGB(200,50,50)}
         TweenService:Create(teleportKnob, TweenInfo.new(0.2), goal):Play()
+        -- Resetar câmera ao desligar
+        if not isTeleporting then
+            camera.CameraType = Enum.CameraType.Custom
+        end
     end
 end)
 
@@ -109,7 +115,7 @@ local function collectPrompt(prompt)
     if ok and item then
         pcall(function()
             prompt:InputHoldBegin()
-            task.wait(0.15)
+            task.wait(0.2)
             prompt:InputHoldEnd()
         end)
     end
@@ -131,7 +137,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- =================== TELEPORTE FIXO + CÂMERA ===================
+-- =================== TELEPORTE REATIVO + CAMERA SPECTATOR ===================
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -146,12 +152,19 @@ task.spawn(function()
             if bestItem then
                 local part = bestItem:FindFirstChild("Part") or bestItem:FindFirstChild("Main") or bestItem:FindFirstChildWhichIsA("MeshPart")
                 if part then
-                    -- Teleporta o personagem
-                    hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
-                    -- Posiciona a câmera acima e atrás do item
+                    local distance = (hrp.Position - part.Position).Magnitude
+                    if distance > TELEPORT_DIST_THRESHOLD then
+                        hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
+                    end
+                    -- câmera spectator
+                    camera.CameraType = Enum.CameraType.Scriptable
                     camera.CFrame = CFrame.new(part.Position + Vector3.new(0,12,12), part.Position)
                 end
+            else
+                camera.CameraType = Enum.CameraType.Custom
             end
+        else
+            camera.CameraType = Enum.CameraType.Custom
         end
     end
 end)
