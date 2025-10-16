@@ -1,0 +1,173 @@
+-- ===================================================================
+--// SCRIPT FINAL V11 (COMPLETO)
+--// Atualizações:
+--// 1) Auto-collect ignora obstáculos
+--// 2) Teleporte reativo mantém personagem fixo sobre o item
+--// 3) Teleporte inteligente: só se move se estiver longe
+--// 4) Teleporte para ao desligar o toggle
+--// 5) Venda: teleport + aviso manual
+-- ===================================================================
+
+-- =================== CONFIGURAÇÕES ===================
+local ALCANCE_COLETA_PASSIVA = 20
+local NOME_DO_NPC_VENDEDOR = "Merchant"
+local DISTANCIA_FIXO = 3 -- distância mínima para "teleportar de novo"  
+
+local priority = {
+    ["Perfect Crystal"] = 6000, ["Green Jewel"] = 3100, ["Red Jewel"] = 400,
+    ["Gold Crown"] = 200, ["Ancient Coin"] = 120, ["Gold Jar"] = 90,
+    ["Golden Ring"] = 54, ["Gold Goblet"] = 48, ["Silver Jar"] = 42,
+    ["Silver Goblet"] = 32, ["Silver Ring"] = 32, ["Bronze Jar"] = 20,
+    ["Copper Goblet"] = 16, ["Rusty Goblet"] = 12
+}
+-- ===================================================
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local hrp = character:WaitForChild("HumanoidRootPart")
+local workspaceItems = workspace
+local isTeleporting = false
+local isCollecting = false
+
+-- =================== CRIAÇÃO DA UI ===================
+local playerGui = player:WaitForChild("PlayerGui")
+local screenGui = playerGui:FindFirstChild("AutoFarmGUI") or Instance.new("ScreenGui", playerGui)
+screenGui.Name = "AutoFarmGUI"; screenGui.ResetOnSpawn = false
+local frame = screenGui:FindFirstChild("MainFrame") or Instance.new("Frame", screenGui)
+frame.Name = "MainFrame"; frame.Size = UDim2.new(0, 140, 0, 180); frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40); frame.BorderSizePixel = 0; frame.Active = true; frame.Draggable = true; frame.Position = UDim2.new(0, 10, 0, 10)
+
+-- BOTÃO DE AUTO TELEPORT
+local teleportLabel = frame:FindFirstChild("TeleportLabel") or Instance.new("TextLabel", frame)
+teleportLabel.Name = "TeleportLabel"; teleportLabel.Size = UDim2.new(1, 0, 0, 20); teleportLabel.Position = UDim2.new(0, 0, 0, 5); teleportLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40); teleportLabel.TextColor3 = Color3.new(1, 1, 1); teleportLabel.Text = "Auto Teleport"; teleportLabel.Font = Enum.Font.SourceSansBold
+local teleportToggle = frame:FindFirstChild("TeleportToggle") or Instance.new("Frame", frame)
+teleportToggle.Name = "TeleportToggle"; teleportToggle.Size = UDim2.new(0, 120, 0, 40); teleportToggle.Position = UDim2.new(0, 10, 0, 25); teleportToggle.BackgroundColor3 = Color3.fromRGB(70, 70, 70); teleportToggle.BorderSizePixel = 0
+local teleportKnob = teleportToggle:FindFirstChild("Knob") or Instance.new("Frame", teleportToggle)
+teleportKnob.Name = "Knob"; teleportKnob.Size = UDim2.new(0, 40, 0, 40); teleportKnob.Position = UDim2.new(0, 0, 0, 0); teleportKnob.BackgroundColor3 = Color3.fromRGB(200, 50, 50); teleportKnob.BorderSizePixel = 0
+
+-- BOTÃO DE AUTO COLLECT
+local collectLabel = frame:FindFirstChild("CollectLabel") or Instance.new("TextLabel", frame)
+collectLabel.Name = "CollectLabel"; collectLabel.Size = UDim2.new(1, 0, 0, 20); collectLabel.Position = UDim2.new(0, 0, 0, 70); collectLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40); collectLabel.TextColor3 = Color3.new(1, 1, 1); collectLabel.Text = "Auto Collect"; collectLabel.Font = Enum.Font.SourceSansBold
+local collectToggle = frame:FindFirstChild("CollectToggle") or Instance.new("Frame", frame)
+collectToggle.Name = "CollectToggle"; collectToggle.Size = UDim2.new(0, 120, 0, 40); collectToggle.Position = UDim2.new(0, 10, 0, 90); collectToggle.BackgroundColor3 = Color3.fromRGB(70, 70, 70); collectToggle.BorderSizePixel = 0
+local collectKnob = collectToggle:FindFirstChild("Knob") or Instance.new("Frame", collectToggle)
+collectKnob.Name = "Knob"; collectKnob.Size = UDim2.new(0, 40, 0, 40); collectKnob.Position = UDim2.new(0, 0, 0, 0); collectKnob.BackgroundColor3 = Color3.fromRGB(200, 50, 50); collectKnob.BorderSizePixel = 0
+
+-- BOTÕES DE VENDA E SERVER HOP
+local sellButton = frame:FindFirstChild("SellButton") or Instance.new("TextButton", frame)
+sellButton.Name = "SellButton"; sellButton.Size = UDim2.new(0, 120, 0, 20); sellButton.Position = UDim2.new(0, 10, 0, 135); sellButton.BackgroundColor3 = Color3.fromRGB(255, 190, 0); sellButton.TextColor3 = Color3.new(1, 1, 1); sellButton.Text = "Teleportar Venda"; sellButton.Font = Enum.Font.SourceSansBold; sellButton.TextSize = 14
+local hopButton = frame:FindFirstChild("HopButton") or Instance.new("TextButton", frame)
+hopButton.Name = "HopButton"; hopButton.Size = UDim2.new(0, 120, 0, 20); hopButton.Position = UDim2.new(0, 10, 0, 160); hopButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255); hopButton.TextColor3 = Color3.new(1, 1, 1); hopButton.Text = "Trocar Servidor"; hopButton.Font = Enum.Font.SourceSansBold; hopButton.TextSize = 14
+
+-- Lógica dos Toggles
+teleportToggle.InputBegan:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+        isTeleporting = not isTeleporting
+        local goal = isTeleporting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)} 
+                              or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
+        TweenService:Create(teleportKnob, TweenInfo.new(0.2), goal):Play() 
+    end 
+end)
+collectToggle.InputBegan:Connect(function(input) 
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+        isCollecting = not isCollecting
+        local goal = isCollecting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)} 
+                             or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
+        TweenService:Create(collectKnob, TweenInfo.new(0.2), goal):Play() 
+    end 
+end)
+
+-- =================== FUNÇÃO DE TELEPORTE E VENDA ===================
+sellButton.MouseButton1Click:Connect(function()
+    local npcFolder = workspace:FindFirstChild("Npcs")
+    if not npcFolder then
+        warn("Pasta 'Npcs' não encontrada.")
+        return
+    end
+
+    local npcVendedor = npcFolder:FindFirstChild(NOME_DO_NPC_VENDEDOR)
+    if not npcVendedor then
+        warn("NPC '"..NOME_DO_NPC_VENDEDOR.."' não encontrado.")
+        return
+    end
+
+    local targetCFrame
+    if npcVendedor.PrimaryPart then
+        targetCFrame = npcVendedor.PrimaryPart.CFrame * CFrame.new(0, 0, 5)
+    elseif npcVendedor:FindFirstChild("Head") then
+        targetCFrame = npcVendedor.Head.CFrame * CFrame.new(0, 0, 5)
+    else
+        warn("NPC não possui PrimaryPart nem Head definido.")
+        return
+    end
+    hrp.CFrame = targetCFrame
+    task.wait(0.1)
+
+    print("Chegou perto do Merchant. Por favor, clique na cabeça dele para abrir o diálogo de venda.")
+end)
+
+-- =================== FUNÇÃO DE SERVER HOP ===================
+hopButton.MouseButton1Click:Connect(function()
+    print("Iniciando troca de servidor...")
+    pcall(TeleportService.Teleport, TeleportService, game.PlaceId)
+end)
+
+-- =================== AUTO COLLECT ===================
+RunService.Heartbeat:Connect(function()
+    if not isCollecting then return end
+
+    for _, item in ipairs(workspaceItems:GetChildren()) do
+        if priority[item.Name] then
+            local part = item:FindFirstChild("Part") or item:FindFirstChild("Main")
+            if part then
+                local distancia = (hrp.Position - part.Position).Magnitude
+                if distancia <= ALCANCE_COLETA_PASSIVA then
+                    local promptInWorkspace = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if promptInWorkspace then
+                        promptInWorkspace:InputHoldBegin()
+                        task.wait(0.1)
+                        promptInWorkspace:InputHoldEnd()
+                    else
+                        hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
+                        task.wait(0.1)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- =================== TELEPORTE REATIVO INTELIGENTE ===================
+local function findBestItem()
+    local bestItem, bestValue = nil, -1
+    for _, item in pairs(workspaceItems:GetChildren()) do
+        if priority[item.Name] and priority[item.Name] > bestValue then
+            bestValue = priority[item.Name]
+            bestItem = item
+        end
+    end
+    return bestItem
+end
+
+task.spawn(function()
+    print("Sistema de Teleporte REATIVO Ativado.")
+    while true do
+        if isTeleporting then
+            local item = findBestItem()
+            if item then
+                local part = item:FindFirstChild("Part") or item:FindFirstChild("Main")
+                if part then
+                    local distancia = (hrp.Position - part.Position).Magnitude
+                    if distancia > DISTANCIA_FIXO then
+                        hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
+                        print("Teleportando para '" .. item.Name .. "' e mantendo posição fixa...")
+                    end
+                end
+            end
+        end
+        task.wait(0.3) -- loop leve
+    end
+end)
