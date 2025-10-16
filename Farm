@@ -1,17 +1,20 @@
 -- ===================================================================
---// SCRIPT FINAL V11 (COMPLETO)
+--// SCRIPT FINAL V12 (COMPLETO)
 --// Atualizações:
 --// 1) Auto-collect ignora obstáculos
 --// 2) Teleporte reativo mantém personagem fixo sobre o item
 --// 3) Teleporte inteligente: só se move se estiver longe
 --// 4) Teleporte para ao desligar o toggle
 --// 5) Venda: teleport + aviso manual
+--// 6) Câmera dinâmica sobre o item
 -- ===================================================================
 
 -- =================== CONFIGURAÇÕES ===================
 local ALCANCE_COLETA_PASSIVA = 20
 local NOME_DO_NPC_VENDEDOR = "Merchant"
 local DISTANCIA_FIXO = 3 -- distância mínima para "teleportar de novo"  
+local CAMERA_ALTURA = 10
+local CAMERA_DISTANCIA = 5
 
 local priority = {
     ["Perfect Crystal"] = 6000, ["Green Jewel"] = 3100, ["Red Jewel"] = 400,
@@ -69,6 +72,10 @@ teleportToggle.InputBegan:Connect(function(input)
         local goal = isTeleporting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)} 
                               or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
         TweenService:Create(teleportKnob, TweenInfo.new(0.2), goal):Play() 
+
+        if not isTeleporting then
+            workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+        end
     end 
 end)
 collectToggle.InputBegan:Connect(function(input) 
@@ -140,7 +147,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- =================== TELEPORTE REATIVO INTELIGENTE ===================
+-- =================== TELEPORTE REATIVO INTELIGENTE COM CÂMERA ===================
 local function findBestItem()
     local bestItem, bestValue = nil, -1
     for _, item in pairs(workspaceItems:GetChildren()) do
@@ -163,11 +170,18 @@ task.spawn(function()
                     local distancia = (hrp.Position - part.Position).Magnitude
                     if distancia > DISTANCIA_FIXO then
                         hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
-                        print("Teleportando para '" .. item.Name .. "' e mantendo posição fixa...")
                     end
+
+                    -- câmera dinâmica
+                    local cam = workspace.CurrentCamera
+                    cam.CameraType = Enum.CameraType.Scriptable
+                    cam.CFrame = CFrame.new(part.Position + Vector3.new(0, CAMERA_ALTURA, CAMERA_DISTANCIA), part.Position)
                 end
             end
+        else
+            -- volta a câmera normal quando desliga o teleporte
+            workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
         end
-        task.wait(0.3) -- loop leve
+        task.wait(0.3)
     end
 end)
