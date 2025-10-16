@@ -1,18 +1,17 @@
 -- ===================================================================
---// SCRIPT FINAL V12 (COMPLETO)
+--// SCRIPT FINAL V13 (COMPLETO E INTELIGENTE)
 --// Atualizações:
---// 1) Auto-collect ignora obstáculos
---// 2) Teleporte reativo mantém personagem fixo sobre o item
---// 3) Teleporte inteligente: só se move se estiver longe
---// 4) Teleporte para ao desligar o toggle
---// 5) Venda: teleport + aviso manual
---// 6) Câmera dinâmica sobre o item
+--// 1) Filtragem de prompts por Adornee (ignora portas)
+--// 2) Câmera dinâmica de cima
+--// 3) Teleporte fixo sobre item
+--// 4) Venda manual e server hop
+--// 5) Auto Collect confiável e limpo
 -- ===================================================================
 
 -- =================== CONFIGURAÇÕES ===================
 local ALCANCE_COLETA_PASSIVA = 20
 local NOME_DO_NPC_VENDEDOR = "Merchant"
-local DISTANCIA_FIXO = 3 -- distância mínima para "teleportar de novo"  
+local DISTANCIA_FIXO = 3 -- distância mínima para teleportar novamente
 local CAMERA_ALTURA = 10
 local CAMERA_DISTANCIA = 5
 
@@ -66,57 +65,41 @@ local hopButton = frame:FindFirstChild("HopButton") or Instance.new("TextButton"
 hopButton.Name = "HopButton"; hopButton.Size = UDim2.new(0, 120, 0, 20); hopButton.Position = UDim2.new(0, 10, 0, 160); hopButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255); hopButton.TextColor3 = Color3.new(1, 1, 1); hopButton.Text = "Trocar Servidor"; hopButton.Font = Enum.Font.SourceSansBold; hopButton.TextSize = 14
 
 -- Lógica dos Toggles
-teleportToggle.InputBegan:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+teleportToggle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
         isTeleporting = not isTeleporting
-        local goal = isTeleporting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)} 
-                              or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
-        TweenService:Create(teleportKnob, TweenInfo.new(0.2), goal):Play() 
-
-        if not isTeleporting then
-            workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
-        end
-    end 
+        local goal = isTeleporting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)}
+                               or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
+        TweenService:Create(teleportKnob, TweenInfo.new(0.2), goal):Play()
+        if not isTeleporting then workspace.CurrentCamera.CameraType = Enum.CameraType.Custom end
+    end
 end)
-collectToggle.InputBegan:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then 
+
+collectToggle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
         isCollecting = not isCollecting
-        local goal = isCollecting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)} 
-                             or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
-        TweenService:Create(collectKnob, TweenInfo.new(0.2), goal):Play() 
-    end 
+        local goal = isCollecting and {Position = UDim2.new(0, 80, 0, 0), BackgroundColor3 = Color3.fromRGB(50, 200, 50)}
+                              or {Position = UDim2.new(0, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(200, 50, 50)}
+        TweenService:Create(collectKnob, TweenInfo.new(0.2), goal):Play()
+    end
 end)
 
--- =================== FUNÇÃO DE TELEPORTE E VENDA ===================
+-- =================== FUNÇÃO DE VENDA ===================
 sellButton.MouseButton1Click:Connect(function()
     local npcFolder = workspace:FindFirstChild("Npcs")
-    if not npcFolder then
-        warn("Pasta 'Npcs' não encontrada.")
-        return
-    end
-
+    if not npcFolder then warn("Pasta 'Npcs' não encontrada.") return end
     local npcVendedor = npcFolder:FindFirstChild(NOME_DO_NPC_VENDEDOR)
-    if not npcVendedor then
-        warn("NPC '"..NOME_DO_NPC_VENDEDOR.."' não encontrado.")
-        return
-    end
-
+    if not npcVendedor then warn("NPC '"..NOME_DO_NPC_VENDEDOR.."' não encontrado.") return end
     local targetCFrame
-    if npcVendedor.PrimaryPart then
-        targetCFrame = npcVendedor.PrimaryPart.CFrame * CFrame.new(0, 0, 5)
-    elseif npcVendedor:FindFirstChild("Head") then
-        targetCFrame = npcVendedor.Head.CFrame * CFrame.new(0, 0, 5)
-    else
-        warn("NPC não possui PrimaryPart nem Head definido.")
-        return
-    end
+    if npcVendedor.PrimaryPart then targetCFrame = npcVendedor.PrimaryPart.CFrame * CFrame.new(0, 0, 5)
+    elseif npcVendedor:FindFirstChild("Head") then targetCFrame = npcVendedor.Head.CFrame * CFrame.new(0, 0, 5)
+    else warn("NPC não possui PrimaryPart nem Head definido.") return end
     hrp.CFrame = targetCFrame
     task.wait(0.1)
-
-    print("Chegou perto do Merchant. Por favor, clique na cabeça dele para abrir o diálogo de venda.")
+    print("Chegou perto do Merchant. Clique na cabeça dele para vender.")
 end)
 
--- =================== FUNÇÃO DE SERVER HOP ===================
+-- =================== SERVER HOP ===================
 hopButton.MouseButton1Click:Connect(function()
     print("Iniciando troca de servidor...")
     pcall(TeleportService.Teleport, TeleportService, game.PlaceId)
@@ -125,29 +108,22 @@ end)
 -- =================== AUTO COLLECT ===================
 RunService.Heartbeat:Connect(function()
     if not isCollecting then return end
-
     for _, item in ipairs(workspaceItems:GetChildren()) do
         if priority[item.Name] then
             local part = item:FindFirstChild("Part") or item:FindFirstChild("Main")
-            if part then
-                local distancia = (hrp.Position - part.Position).Magnitude
-                if distancia <= ALCANCE_COLETA_PASSIVA then
-                    local promptInWorkspace = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if promptInWorkspace then
-                        promptInWorkspace:InputHoldBegin()
-                        task.wait(0.1)
-                        promptInWorkspace:InputHoldEnd()
-                    else
-                        hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
-                        task.wait(0.1)
-                    end
+            if part and (hrp.Position - part.Position).Magnitude <= ALCANCE_COLETA_PASSIVA then
+                local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                if prompt and prompt.Adornee and (prompt.Adornee.Name == "Main" or prompt.Adornee.Name == "Part" or prompt.Adornee.Name == "MeshPart") then
+                    prompt:InputHoldBegin()
+                    task.wait(0.1)
+                    prompt:InputHoldEnd()
                 end
             end
         end
     end
 end)
 
--- =================== TELEPORTE REATIVO INTELIGENTE COM CÂMERA ===================
+-- =================== TELEPORTE REATIVO COM CÂMERA ===================
 local function findBestItem()
     local bestItem, bestValue = nil, -1
     for _, item in pairs(workspaceItems:GetChildren()) do
@@ -169,17 +145,14 @@ task.spawn(function()
                 if part then
                     local distancia = (hrp.Position - part.Position).Magnitude
                     if distancia > DISTANCIA_FIXO then
-                        hrp.CFrame = part.CFrame + Vector3.new(0,3,0)
+                        hrp.CFrame = part.CFrame + Vector3.new(0, 3, 0)
                     end
-
-                    -- câmera dinâmica
                     local cam = workspace.CurrentCamera
                     cam.CameraType = Enum.CameraType.Scriptable
                     cam.CFrame = CFrame.new(part.Position + Vector3.new(0, CAMERA_ALTURA, CAMERA_DISTANCIA), part.Position)
                 end
             end
         else
-            -- volta a câmera normal quando desliga o teleporte
             workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
         end
         task.wait(0.3)
