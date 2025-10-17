@@ -122,14 +122,47 @@ local function collectPrompt(prompt)
 end
 
 -- =================== LÓGICA DE COLETA ===================
+-- =================== LÓGICA DE COLETA (CORRIGIDA + "Main" INCLUSO) ===================
 RunService.Heartbeat:Connect(function()
     if not isCollecting then return end
+
+    -- Filtra apenas os prompts válidos (com Adornee sendo Part, MeshPart ou chamado "Main")
+    local validPrompts = {}
+    local promptFolder = playerGui:FindFirstChild("ProximityPrompts")
+    if promptFolder then
+        for _, guiPrompt in ipairs(promptFolder:GetChildren()) do
+            if guiPrompt:IsA("ProximityPrompt") then
+                local adornee = guiPrompt.Adornee
+                local isValid = false
+
+                if adornee then
+                    if adornee:IsA("Part") or adornee:IsA("MeshPart") then
+                        isValid = true
+                    elseif adornee.Name == "Main" then
+                        isValid = true
+                    end
+                end
+
+                if isValid then
+                    table.insert(validPrompts, guiPrompt)
+                else
+                    -- Desativa ou remove prompts que não pertencem a itens coletáveis
+                    pcall(function()
+                        guiPrompt.Enabled = false
+                        guiPrompt:Destroy()
+                    end)
+                end
+            end
+        end
+    end
+
+    -- Itera pelos itens do mapa e coleta os válidos
     for _, item in ipairs(workspaceItems:GetChildren()) do
         if priority[item.Name] then
             local part = item:FindFirstChild("Part") or item:FindFirstChild("Main") or item:FindFirstChildWhichIsA("MeshPart")
             if part and (hrp.Position - part.Position).Magnitude <= ALCANCE_COLETA_PASSIVA then
                 local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt then
+                if prompt and table.find(validPrompts, prompt) then
                     collectPrompt(prompt)
                 end
             end
