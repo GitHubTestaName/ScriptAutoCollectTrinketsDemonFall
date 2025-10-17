@@ -122,53 +122,136 @@ local function collectPrompt(prompt)
 end
 
 -- =================== LÓGICA DE COLETA ===================
--- =================== LÓGICA DE COLETA (CORRIGIDA + "Main" INCLUSO) ===================
-RunService.Heartbeat:Connect(function()
-    if not isCollecting then return end
+-- ============ DEBUG E HELPERS ============
+local DEBUG = true
+local function dbg(...)
+    if DEBUG then
+        print("[AF-Collect]", ...)
+    end
+end
+local function warnf(...)
+    warn("[AF-Collect][ERRO]", ...)
+end
 
-    -- Filtra apenas os prompts válidos (com Adornee sendo Part, MeshPart ou chamado "Main")
-    local validPrompts = {}
-    local promptFolder = playerGui:FindFirstChild("ProximityPrompts")
-    if promptFolder then
-        for _, guiPrompt in ipairs(promptFolder:GetChildren()) do
-            if guiPrompt:IsA("ProximityPrompt") then
-                local adornee = guiPrompt.Adornee
-                local isValid = false
+-- Verifica se um ProximityPrompt é "coletável" pelo seu critério de Adornee
+local function isCollectablePrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then
+        return false, "Prompt inexistente ou não é ProximityPrompt"
+    end
 
-                if adornee then
-                    if adornee:IsA("Part") or adornee:IsA("MeshPart") then
-                        isValid = true
-                    elseif adornee.Name == "Main" then
-                        isValid = true
+    local ad = prompt.Adornee
+    if not ad then
+        -- fallback: tenta achar um BasePart no parent para usar como referência
+        ad = prompt.Parent and prompt.Parent:FindFirstChildWhichIsA("BasePart")
+    end
+    if not ad then
+        return false, "Sem Adornee e sem BasePart no parent"
+    end
+
+    if ad:IsA("Part") or ad:IsA("MeshPart") then
+        return true
+    end
+    if ad.Name == "Main" then
+        return true
+    end
+    return false, ("Adornee inválido: %s (%s)"):format(ad.Name, ad.ClassName)
+end
+
+-- Retorna a posição de referência do prompt (Adornee ou um BasePart próximo)
+local function getPromptPosition(prompt)
+    local ad = prompt.Adornee
+    if ad and ad:IsA("BasePart") then
+        return ad.Position
+    end
+    local bp = prompt.Parent and prompt.Parent:FindFirstChildWhichIsA("BasePart")
+    if bp then return bp.Position end
+    return nil
+end
+
+-- Coleta segura com logs
+local function tryCollectPrompt(prompt)
+    local okValid, reason = isCollectablePrompt(prompt)
+    if not okValid then
+        dbg("Rejeitado:", reason)
+        return false, reason
+    end
+
+    if not prompt.Enabled then
+        return false, "Prompt.Enabled = false"
+    end
+
+    local pos = getPromptPosition(prompt)
+    if not pos then
+        return false, "Sem posição (Adornee/BasePart) para medir distância"
+    end
+
+    local dist = (hrp.Position - pos).Magnitude
+    local maxDist = prompt.MaxActivationDistance or 0
+    if maxDist <= 0 then
+        return false, "MaxActivationDistance <= 0"
+    end
+    if dist > maxDist then
+        return false, ("Longe demais: dist=%.1f > Max=%.1f"):format(dist, maxDist)
+    end
+
+    -- Efetivamente “apertar” o prompt
+    -- Se for hold, seguramos rapidinho; se não for, um tap já serve.
+    local hold = prompt.HoldDuration or 0
+    dbg(("Coletando '%s' (dist=%.1f, hold=%.2f)"):format(prompt.Name, dist, hold))
+    pcall(function()
+        prompt:InputHoldBegin()
+        if hold > 0 then
+            task.wait(math.max(hold, 0.15))
+        else
+            task.wait(0.15)
+        end
+        prompt:InputHoldEnd()
+    end)
+    return true
+end
+
+-- Busca o MELHOR item dentro do alcance e o respectivo prompt válido
+local function findBestCollectablePrompt()
+    local bestItem, bestScore, bestPrompt = nil, -1, nil
+
+    for _, item in ipairs(workspaceItems:GetChildren()) do
+        local val = priority[item.Name]
+        if val then
+            -- prioriza por valor (tabela priority) e proximidade
+            local part = item:FindFirstChild("Part") or item:FindFirstChild("Main") or item:FindFirstChildWhichIsA("MeshPart")
+            if part then
+                local d = (hrp.Position - part.Position).Magnitude
+                if d <= ALCANCE_COLETA_PASSIVA then
+                    -- pegue o prompt mais próximo dentro do item
+                    local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt then
+                        local ok, _ = isCollectablePrompt(prompt)
+                        if ok then
+                            -- score simples: valor prioritário / (1 + distância)
+                            local score = val / (1 + d)
+                            if score > bestScore then
+                                bestScore = score
+                                bestItem = item
+                                bestPrompt = prompt
+                            end
+                        else
+                            -- log leve: prompt existe mas não é válido (adornee errado)
+                            if DEBUG then
+                                local ad = prompt.Adornee
+                                dbg(("Descartado %s: Adornee=%s(%s)")
+                                    :format(item.Name, ad and ad.Name or "nil", ad and ad.ClassName or "nil"))
+                            end
+                        end
+                    else
+                        if DEBUG then dbg("Sem ProximityPrompt em", item:GetFullName()) end
                     end
                 end
-
-                if isValid then
-                    table.insert(validPrompts, guiPrompt)
-                else
-                    -- Desativa ou remove prompts que não pertencem a itens coletáveis
-                    pcall(function()
-                        guiPrompt.Enabled = false
-                        guiPrompt:Destroy()
-                    end)
-                end
             end
         end
     end
 
-    -- Itera pelos itens do mapa e coleta os válidos
-    for _, item in ipairs(workspaceItems:GetChildren()) do
-        if priority[item.Name] then
-            local part = item:FindFirstChild("Part") or item:FindFirstChild("Main") or item:FindFirstChildWhichIsA("MeshPart")
-            if part and (hrp.Position - part.Position).Magnitude <= ALCANCE_COLETA_PASSIVA then
-                local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-                if prompt and table.find(validPrompts, prompt) then
-                    collectPrompt(prompt)
-                end
-            end
-        end
-    end
-end)
+    return bestItem, bestPrompt
+end
 
 -- =================== TELEPORTE REATIVO + CAMERA SPECTATOR ===================
 task.spawn(function()
